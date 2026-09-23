@@ -1,0 +1,8 @@
+services:
+  app-023:
+    build: .
+    image: app-023-refactor-20:latest
+    container_name: app-023-refactor-20
+    ports:
+      - "8293:80"
+    restart: unless-stopped
