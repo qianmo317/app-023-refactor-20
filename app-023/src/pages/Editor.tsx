@@ -6,6 +6,7 @@ import { TICKS_PER_BEAT, type Hit, type Score, type Step, type Tech } from '../t
 import { barTicks, setStepAt, stepAtOffset } from '../lib/grid';
 import { resolveKey, TECH_NAMES } from '../lib/glyphs';
 import { emptyBar } from '../lib/factory';
+import { relayoutBar } from '../lib/relayout';
 import { getScore, saveScore } from '../lib/storage';
 import { useAudio } from '../hooks/useAudio';
 import { ScoreGrid, type Selection } from '../components/ScoreGrid';
@@ -251,33 +252,8 @@ export function Editor({ scoreId, onNavigate }: Props) {
 
   const changeBeatsPerBar = useCallback(
     (bpb: number) => {
-      patch((s) => {
-        const bars = s.bars.map((bar, i) => {
-          // 保留原 hit 的绝对位置
-          const offsets: number[] = [];
-          let acc = 0;
-          for (const st of bar.steps) {
-            offsets.push(acc);
-            acc += st.beats;
-          }
-          const hitsByTick = new Map<number, Hit[]>();
-          bar.steps.forEach((st, si) => {
-            if (st.hits.length) hitsByTick.set(offsets[si], st.hits);
-          });
-          const nb = emptyBar(i, bpb);
-          const newOffsets: number[] = [];
-          acc = 0;
-          for (const st of nb.steps) {
-            newOffsets.push(acc);
-            acc += st.beats;
-          }
-          nb.steps = nb.steps.map((st, si) =>
-            hitsByTick.has(newOffsets[si]) ? { ...st, hits: hitsByTick.get(newOffsets[si])! } : st,
-          );
-          return nb;
-        });
-        return { ...s, bars, freeMeter: bpb === 0 ? s.freeMeter : s.freeMeter };
-      });
+      // 搬运/重排逻辑在纯函数 relayoutBar 中，这里只负责拿结果替换
+      patch((s) => ({ ...s, bars: s.bars.map((bar) => relayoutBar(bar, bpb)) }));
     },
     [patch],
   );
