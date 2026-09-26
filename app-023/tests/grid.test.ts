@@ -1,6 +1,6 @@
 // 时值换算用例 —— 覆盖验收标准「附点、切分、四分之一拍等 20 组用例换算正确」
 import { describe, expect, it } from 'vitest';
-import { TICKS_PER_BEAT, type Bar, type Step } from '../src/types';
+import { TICKS_PER_BEAT, type Bar, type Hit, type Step } from '../src/types';
 import {
   DURATIONS,
   absoluteOffsets,
@@ -8,6 +8,7 @@ import {
   barsPerRow,
   durationLine,
   isBarFull,
+  remapBarHits,
   scoreWidthPx,
   setStepAt,
   stepAtOffset,
@@ -126,5 +127,62 @@ describe('T25-T26 曲牌骨架换算', () => {
     const s = scoreFromPattern(PATTERNS.find((p) => p.name === '急急风')!);
     expect(s.bars[0].beatsPerBar).toBe(2);
     expect(s.bars.length).toBe(4);
+  });
+});
+
+describe('换拍号搬运 remapBarHits（纯函数直调）', () => {
+  const hit = (instrumentId: string): Hit => ({ instrumentId, velocity: 2 });
+  const hitIds = (b: Bar) => b.steps.map((s) => s.hits.map((h) => h.instrumentId));
+
+  it('小节变长：2/4 → 4/4，原击点留在原格偏移，新增部分为空', () => {
+    const old = bar(2, [st(4, { hits: [hit('gu')] }), st(4, { hits: [hit('daluo')] })], 3);
+    const next = remapBarHits(old, 4);
+    expect(next.index).toBe(3); // 小节序号随迁
+    expect(next.beatsPerBar).toBe(4);
+    expect(next.steps.map((s) => s.beats)).toEqual([4, 4, 4, 4]);
+    expect(hitIds(next)).toEqual([['gu'], ['daluo'], [], []]);
+    expect(isBarFull(next)).toBe(true);
+    // 纯函数不改旧小节
+    expect(old.beatsPerBar).toBe(2);
+    expect(old.steps.map((s) => s.hits.length)).toEqual([1, 1]);
+  });
+
+  it('小节变短：4/4 → 2/4，超出新小节的击点被丢掉', () => {
+    const old = bar(4, [
+      st(4, { hits: [hit('gu')] }),
+      st(4, { hits: [hit('daluo')] }),
+      st(4, { hits: [hit('bo')] }), // 格 8，新小节装不下
+      st(4, { hits: [hit('xiaoluo')] }), // 格 12，新小节装不下
+    ]);
+    const next = remapBarHits(old, 2);
+    expect(next.beatsPerBar).toBe(2);
+    expect(next.steps.map((s) => s.beats)).toEqual([4, 4]);
+    expect(hitIds(next)).toEqual([['gu'], ['daluo']]);
+    expect(isBarFull(next)).toBe(true);
+  });
+
+  it('拍数不变：4/4 → 4/4，整拍位置击点保留，rest/tie 不随迁（现状）', () => {
+    const old = bar(4, [
+      st(4, { hits: [hit('gu')], tie: true }),
+      st(4, { rest: true }),
+      st(4, { hits: [hit('bo')] }),
+      st(4),
+    ]);
+    const next = remapBarHits(old, 4);
+    expect(hitIds(next)).toEqual([['gu'], [], ['bo'], []]);
+    expect(next.steps[0].tie).toBeUndefined();
+    expect(next.steps[1].rest).toBeUndefined();
+    expect(isBarFull(next)).toBe(true);
+  });
+
+  it('击点落在非整拍位置：新小节无相同格偏移，击点不搬', () => {
+    // 旧小节切分 2+2+4+4+4：鼓在格 2（半拍偏移），钹在格 4（整拍）
+    const old = bar(4, [st(2), st(2, { hits: [hit('gu')] }), st(4, { hits: [hit('bo')] }), st(4), st(4)]);
+    expect(stepOffsets(old)).toEqual([0, 2, 4, 8, 12]);
+    const next = remapBarHits(old, 4);
+    expect(hitIds(next)).toEqual([[], ['bo'], [], []]); // 格 2 对不上 → 鼓丢；格 4 对上 → 钹留
+    // 变长也救不回非整拍击点：2/4 切分 2+2+4，鼓在格 2
+    const short = bar(2, [st(2), st(2, { hits: [hit('gu')] }), st(4)]);
+    expect(hitIds(remapBarHits(short, 4))).toEqual([[], [], [], []]);
   });
 });

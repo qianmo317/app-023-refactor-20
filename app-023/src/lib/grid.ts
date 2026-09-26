@@ -1,6 +1,6 @@
 // 谱面网格换算 —— 最小时间单位为「格」，每拍 4 格。
 // 一律用整数格存谱，绝不用浮点时间（避免渲染/打印 1px 抖动与累积误差）。
-import { TICKS_PER_BEAT, type Bar, type Score, type Step } from '../types';
+import { TICKS_PER_BEAT, type Bar, type Hit, type Score, type Step } from '../types';
 
 /** 常用时值 → 格数 */
 export const DURATIONS: { name: string; ticks: number; abbr: string }[] = [
@@ -142,6 +142,33 @@ export function setStepAt(
   });
   if (acc !== total) return null;
   return rebuilt;
+}
+
+/**
+ * 换拍号搬运：把旧小节的击点按格偏移搬到新拍号的小节。
+ * 纯函数 —— 不碰界面、不读组件状态；输入旧小节与新每小节拍数，输出新小节。
+ * 现状逐条保留：
+ *  - 击点只搬到格偏移相同的位置（新小节按整拍空 step 铺满，偏移对不上即不搬）；
+ *  - 新小节比旧的小节短时，超出部分的击点被丢掉；
+ *  - 只搬运 hits，rest/tie/tempoNote 不随迁。
+ */
+export function remapBarHits(bar: Pick<Bar, 'index' | 'steps'>, beatsPerBar: number): Bar {
+  const offsets = stepOffsets(bar);
+  const hitsByTick = new Map<number, Hit[]>();
+  bar.steps.forEach((st, si) => {
+    if (st.hits.length) hitsByTick.set(offsets[si], st.hits);
+  });
+  // 与 emptyBar 同构：新小节用整拍空 step 铺满
+  const steps: Step[] = [];
+  for (let i = 0; i < beatsPerBar; i++) steps.push({ beats: TICKS_PER_BEAT, hits: [] });
+  const newOffsets = stepOffsets({ steps });
+  return {
+    index: bar.index,
+    beatsPerBar,
+    steps: steps.map((st, si) =>
+      hitsByTick.has(newOffsets[si]) ? { ...st, hits: hitsByTick.get(newOffsets[si])! } : st,
+    ),
+  };
 }
 
 /** 全曲是否结构有效（每小节铺满、格数为正整数） */
